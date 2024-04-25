@@ -300,6 +300,7 @@ class ConsoleChatBot:  # pylint: disable=too-many-instance-attributes
     def _update_conversation(self, content, role):
         assert role in ("user", "assistant")
         message = {"role": role, "content": content}
+        print(message)
         self.info["messages"].append(message)
 
     def start_prompt(self, content=None, box=True, logger=None):

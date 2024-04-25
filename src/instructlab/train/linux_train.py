@@ -107,6 +107,7 @@ def linux_train(
     num_epochs: Optional[int] = None,
     device: torch.device = torch.device("cpu"),
     four_bit_quant: bool = False,
+    model_name: str = "instructlab/merlinite-7b-lab"
 ):
     """Lab Train for Linux!"""
     print("LINUX_TRAIN.PY: NUM EPOCHS IS: ", num_epochs)
@@ -126,7 +127,6 @@ def linux_train(
     test_dataset = load_dataset("json", data_files=test_file, split="train")
     train_dataset.to_pandas().head()
 
-    model_name = "instructlab/merlinite-7b-lab"
     tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
     tokenizer.pad_token = tokenizer.eos_token
 

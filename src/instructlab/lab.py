@@ -16,6 +16,7 @@ import typing
 from click_didyoumean import DYMGroup
 from git import GitError, Repo
 from huggingface_hub import hf_hub_download
+import huggingface_hub
 from huggingface_hub import logging as hf_logging
 import click
 import yaml
@@ -292,8 +293,14 @@ utils.make_lab_diff_aliases(cli, diff)
     type=click.INT,
     help="The context size is the maximum number of tokens considered by the model, for both the prompt and response. Defaults to 4096.",
 )
+@click.option(
+    "--model-family",
+    type=str,
+    default="merlinite",
+    help="Model family is used to specify which chat template to serve with",
+)
 @click.pass_context
-def serve(ctx, model_path, gpu_layers, num_threads, max_ctx_size):
+def serve(ctx, model_path, gpu_layers, num_threads, max_ctx_size, model_family):
     """Start a local server"""
     # pylint: disable=C0415
     # Local
@@ -311,6 +318,7 @@ def serve(ctx, model_path, gpu_layers, num_threads, max_ctx_size):
             model_path,
             gpu_layers,
             max_ctx_size,
+            model_family,
             num_threads,
             host,
             port,
@@ -428,6 +436,11 @@ def serve(ctx, model_path, gpu_layers, num_threads, max_ctx_size):
     default="",
     help="TLS client certificate password.",
 )
+@click.option(
+    "--model-path",
+    default=None,
+    help="model path to override the server config's model_path"
+)
 @click.pass_context
 def generate(
     ctx,
@@ -448,6 +461,7 @@ def generate(
     tls_client_cert,
     tls_client_key,
     tls_client_passwd,
+    model_path,
 ):
     """Generates synthetic data to enhance your example data"""
     # pylint: disable=C0415
@@ -467,6 +481,7 @@ def generate(
         api_base = endpoint_url
     else:
         try:
+            # might need to funnel model-path into this?
             server_process, api_base = ensure_server(
                 ctx.obj.logger,
                 ctx.obj.config.serve,
@@ -474,6 +489,7 @@ def generate(
                 tls_client_cert,
                 tls_client_key,
                 tls_client_passwd,
+                model_path,
             )
         except Exception as exc:
             click.secho(f"Failed to start server: {exc}", fg="red")
@@ -526,7 +542,12 @@ def generate(
 @click.option(
     "-m",
     "--model",
-    help="Model to use",
+    help="Model name to print in chat process",
+)
+@click.option(
+    "--model-path",
+    default=None,
+    help="Model path to use when starting server",
 )
 @click.option(
     "-c",
@@ -604,6 +625,7 @@ def chat(
     tls_client_cert,
     tls_client_key,
     tls_client_passwd,
+    model_path,
 ):
     """Run a chat using the modified model"""
     # pylint: disable=C0415
@@ -623,6 +645,7 @@ def chat(
                 tls_client_cert,
                 tls_client_key,
                 tls_client_passwd,
+                model_path,
             )
         except Exception as exc:
             click.secho(f"Failed to start server: {exc}", fg="red")
@@ -685,16 +708,32 @@ def chat(
 def download(ctx, repository, release, filename, model_dir):
     """Download the model(s) to train"""
     click.echo(f"Downloading model from {repository}@{release} to {model_dir}...")
+    if "HF_TOKEN" not in os.environ and repository != "instructlab/merlinite-7b-lab-GGUF":
+        raise ValueError("HF_TOKEN var needs to be set in your environment to download HF Model")
     try:
         if ctx.obj is not None:
             hf_logging.set_verbosity(ctx.obj.config.general.log_level.upper())
-
-        hf_hub_download(
-            repo_id=repository,
-            revision=release,
-            filename=filename,
-            local_dir=model_dir,
-        )
+        files = huggingface_hub.list_repo_files(repo_id=repository, token=os.getenv("HF_TOKEN"))
+        if any(".safetensors" in string for string in files):
+            if not os.path.exists(os.path.join(model_dir, "safetensors")):
+                os.mkdir(os.path.join(model_dir, "safetensors"))
+            for f in files:
+                # if fullmodel we need to download all safetensors
+                hf_hub_download(
+                    token=os.getenv("HF_TOKEN"),
+                    repo_id=repository,
+                    revision=release,
+                    filename=f,
+                    local_dir=os.path.join(model_dir, "safetensors"),
+                )
+        else:
+            hf_hub_download(
+                token=os.getenv("HF_TOKEN"),
+                repo_id=repository,
+                revision=release,
+                filename=filename,
+                local_dir=model_dir,
+            )
     except Exception as exc:
         click.secho(
             f"Downloading model failed with the following Hugging Face Hub error: {exc}",
@@ -828,6 +867,12 @@ TORCH_DEVICE = TorchDeviceParam()
         "(reduces GPU VRAM usage and may slow down training)"
     ),
 )
+@click.option(
+    "--model-name",
+    default="instructlab/merlinite-7b-lab",
+    show_default=True,
+    help="model name to use in training"
+)
 @click.pass_context
 def train(
     ctx,
@@ -843,6 +888,7 @@ def train(
     num_epochs,
     device: "torch.device",
     four_bit_quant: bool,
+    model_name: str,
 ):
     """
     Takes synthetic data generated locally with `ilab generate` and the previous model and learns a new model using the MLX API.
@@ -905,6 +951,7 @@ def train(
             num_epochs=num_epochs,
             device=device,
             four_bit_quant=four_bit_quant,
+            model_name=model_name,
         )
 
         training_results_dir = "./training_results"
