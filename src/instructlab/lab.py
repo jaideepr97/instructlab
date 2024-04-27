@@ -428,6 +428,11 @@ def serve(ctx, model_path, gpu_layers, num_threads, max_ctx_size):
     default="",
     help="TLS client certificate password.",
 )
+@click.option(
+    "--model-family",
+    default="merlinite",
+    help="model family to use when picking a generation template"
+)
 @click.pass_context
 def generate(
     ctx,
@@ -448,6 +453,7 @@ def generate(
     tls_client_cert,
     tls_client_key,
     tls_client_passwd,
+    model_family,
 ):
     """Generates synthetic data to enhance your example data"""
     # pylint: disable=C0415
@@ -488,6 +494,7 @@ def generate(
             logger=logger,
             api_base=api_base,
             api_key=api_key,
+            model_family=model_family,
             model_name=model,
             num_cpus=num_cpus,
             num_instructions_to_generate=num_instructions,
