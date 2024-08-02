@@ -87,6 +87,23 @@ def get_evaluator(
                 fg="red",
             )
             raise click.exceptions.Exit(1)
+        if os.path.exists(model):
+            model = pathlib.Path(model)
+            valid_model = False
+            if model.is_dir():
+                valid_model = backends.is_model_safetensors(model)
+            elif model.is_file():
+                valid_model = backends.is_model_gguf(model)
+            if not valid_model:
+                click.secho(
+                    "MTBench and MTBenchBranch need to be passed either a safetensors directory or a GGUF file",
+                    fg="red",
+                )
+                raise click.exceptions.Exit(1)
+            click.secho(
+                f"Using local model found at '{model}' for '--model'",
+                fg="blue",
+            )
         if benchmark == Benchmark.MT_BENCH:
             # Third Party
             from instructlab.eval.mt_bench import MTBenchEvaluator
@@ -126,6 +143,24 @@ def get_evaluator(
                 fg="red",
             )
             raise click.exceptions.Exit(1)
+        # ensure user is passing full safetensors if they specify a local directory
+        # TODO: also allow GGUF once the following is resolved: https://github.com/instructlab/eval/issues/50
+        if os.path.isdir(model):
+            if not backends.is_model_safetensors(pathlib.Path(model)):
+                click.secho(
+                    "MMLU and MMLUBranch can currently only be used with a safetensors directory",
+                    fg="red",
+                )
+                raise click.exceptions.Exit(1)
+            click.secho(
+                f"Using local safetensors found at '{model}' for '--model'",
+                fg="blue",
+            )
+        else:
+            click.secho(
+                f"Using safetensors from Hugging Face repo '{model}' for '--model'",
+                fg="blue",
+            )
         if benchmark == Benchmark.MMLU:
             # Third Party
             from instructlab.eval.mmlu import MMLUEvaluator
@@ -237,13 +272,13 @@ def qa_pairs_to_qna_to_avg_scores(qa_pairs: list[dict]) -> dict[str, float]:
 
 
 def launch_server(
-    ctx,
-    model,
-    model_name,
-    max_workers,
-    gpus,
-    backend,
-    enable_serving_output,
+    ctx: click.Context,
+    model: str,
+    model_name: str,
+    max_workers: int,
+    gpus: int,
+    backend: str | None,
+    enable_serving_output: bool,
 ) -> tuple:
     eval_serve = deepcopy(ctx.obj.config.serve)
     if backend is None:
@@ -300,7 +335,15 @@ def launch_server(
     try:
         # http_client is handling tls params
         api_base = backend_instance.run_detached(
-            http_client(ctx.params), background=not enable_serving_output
+            http_client(
+                {
+                    "tls_client_cert": ctx.params["tls_client_cert"],
+                    "tls_client_key": ctx.params["tls_client_key"],
+                    "tls_client_passwd": ctx.params["tls_client_passwd"],
+                    "tls_insecure": ctx.params["tls_insecure"],
+                }
+            ),
+            background=not enable_serving_output,
         )
     except Exception as exc:
         click.secho(f"Failed to start server: {exc}", fg="red")
@@ -333,7 +376,7 @@ def launch_server(
     type=click.STRING,
     cls=clickext.ConfigOption,
     config_sections="mt_bench",
-    help="Model to be used as a judge for running mt_bench or mt_bench_branch - can be a local path or the name of a Hugging Face repository",
+    help="Model to be used as a judge for running mt_bench or mt_bench_branch - must be a local path to a downloaded model",
 )
 @click.option(
     "--output-dir",
@@ -391,7 +434,7 @@ def launch_server(
 )
 @click.option(
     "--gpus",
-    type=click.INT,
+    type=click.IntRange(min=0),
     help="Number of GPUs to utilize for evaluation (not applicable to llama-cpp)",
 )
 @click.option(
@@ -465,6 +508,7 @@ def evaluate(
     tls_client_passwd,  # pylint: disable=unused-argument
     enable_serving_output,
 ):
+    """Evaluates a trained model"""
     # get appropriate evaluator class from Eval lib
     evaluator = get_evaluator(
         model,

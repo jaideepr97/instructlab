@@ -457,9 +457,6 @@ class TestLabTrain:
                     DEFAULTS.DATASETS_DIR,
                 ],
             )
-            print(f"{result.exception=}")
-            print(f"{result.output=}")
-            print(f"{result.stdout=}")
             assert result.exception is None
             assert result.exit_code == 0
             convert_llama_to_gguf_mock.assert_called_once()

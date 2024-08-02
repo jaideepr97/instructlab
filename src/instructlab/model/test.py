@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 @click.option(
     "-m",
     "--model",
-    default=lambda: DEFAULTS.DEFAULT_GGUF_MODEL,
+    default=lambda: DEFAULTS.DEFAULT_MODEL,
     show_default=True,
     help="Base model name to test on Linux",
 )
@@ -150,7 +150,7 @@ def test(
             answers = linux_test(
                 ctx,
                 test_file,
-                models=[model, Path(DEFAULTS.MODELS_DIR) / "ggml-model-f16.gguf"],
+                models=[model, Path(DEFAULTS.CHECKPOINTS_DIR) / "ggml-model-f16.gguf"],
                 create_params={"max_tokens": 100},
             )
             for question, models in answers.items():

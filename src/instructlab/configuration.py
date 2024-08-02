@@ -36,12 +36,14 @@ from . import log
 
 ILAB_PACKAGE_NAME = "instructlab"
 CONFIG_FILENAME = "config.yaml"
+CONFIG_VERSION = "1.0.0"
 
 
 class STORAGE_DIR_NAMES:
     ILAB = "instructlab"
     DATASETS = "datasets"
     CHECKPOINTS = "checkpoints"
+    OCI = "oci"
     MODELS = "models"
     TAXONOMY = "taxonomy"
     INTERNAL = (
@@ -60,8 +62,13 @@ class _InstructlabDefaults:
     # define static defaults up here
     API_KEY = "no_api_key"
 
+    # ILAB_GLOBAL_CONFIG is the environment variable that can be used to override the default config
+    # file. When set, the CLI will use the file specified in the environment variable as a sample to
+    # generate the default config file.
+    ILAB_GLOBAL_CONFIG = "ILAB_GLOBAL_CONFIG"
+
     # TODO: Consolidate --model and --model-path into one --model-path flag since we always need a path now
-    MODEL_NAME = "merlinite-7b-lab-Q4_K_M"
+    MODEL_NAME_OLD = "merlinite-7b-lab-Q4_K_M"
     MERLINITE_GGUF_REPO = "instructlab/merlinite-7b-lab-GGUF"
     GGUF_MODEL_NAME = "merlinite-7b-lab-Q4_K_M.gguf"
     MODEL_REPO = "instructlab/granite-7b-lab"
@@ -72,10 +79,10 @@ class _InstructlabDefaults:
     # TODO: these constants should be removed, they should not leak out
     NUM_CPUS = 10
     CHUNK_WORD_COUNT = 1000
-    NUM_INSTRUCTIONS = 100
     CONNECTION_TIMEOUT = httpx.Timeout(timeout=30.0)
     # use spawn start method, fork is not thread-safe
     MULTIPROCESSING_START_METHOD = "spawn"
+    SDG_SCALE_FACTOR = 30
 
     # When otherwise unknown, ilab uses this as the default family
     MODEL_FAMILY = "merlinite"
@@ -95,7 +102,11 @@ class _InstructlabDefaults:
 
     @property
     def CHECKPOINTS_DIR(self) -> str:
-        return path.join(self._cache_home, STORAGE_DIR_NAMES.CHECKPOINTS)
+        return path.join(self._data_dir, STORAGE_DIR_NAMES.CHECKPOINTS)
+
+    @property
+    def OCI_DIR(self) -> str:
+        return path.join(self._cache_home, STORAGE_DIR_NAMES.OCI)
 
     @property
     def DATASETS_DIR(self) -> str:
@@ -107,15 +118,15 @@ class _InstructlabDefaults:
 
     @property
     def MODELS_DIR(self) -> str:
-        return path.join(self._data_dir, STORAGE_DIR_NAMES.MODELS)
+        return path.join(self._cache_home, STORAGE_DIR_NAMES.MODELS)
 
     @property
     def DEFAULT_MODEL(self) -> str:
-        return path.join(self.MODELS_DIR, self.MODEL_NAME)
+        return path.join(self.MODELS_DIR, self.GGUF_MODEL_NAME)
 
     @property
-    def DEFAULT_GGUF_MODEL(self) -> str:
-        return path.join(self.MODELS_DIR, self.GGUF_MODEL_NAME)
+    def DEFAULT_JUDGE_MODEL(self) -> str:
+        return path.join(self.MODELS_DIR, self.JUDGE_MODEL_MT)
 
     @property
     def TAXONOMY_DIR(self) -> str:
@@ -245,26 +256,6 @@ class _chat(BaseModel):
     max_tokens: typing.Optional[int] = None
 
 
-class _generate(BaseModel):
-    """Class describing configuration of the generate sub-command."""
-
-    # model configuration
-    model_config = ConfigDict(extra="ignore")
-
-    # required fields
-    model: StrictStr
-    taxonomy_path: StrictStr
-    taxonomy_base: StrictStr
-
-    # additional fields with defaults
-    num_cpus: PositiveInt = DEFAULTS.NUM_CPUS
-    chunk_word_count: PositiveInt = DEFAULTS.CHUNK_WORD_COUNT
-    num_instructions: PositiveInt = DEFAULTS.NUM_INSTRUCTIONS
-    output_dir: StrictStr = Field(default_factory=lambda: DEFAULTS.DATASETS_DIR)
-    prompt_file: StrictStr = Field(default_factory=lambda: DEFAULTS.PROMPT_FILE)
-    seed_file: StrictStr = Field(default_factory=lambda: DEFAULTS.SEED_FILE)
-
-
 class _serve_vllm(BaseModel):
     """Class describing configuration of vllm serving backend."""
 
@@ -288,13 +279,20 @@ class _serve(BaseModel):
     model_config = ConfigDict(extra="ignore", protected_namespaces=())
 
     # vllm configuration
-    vllm: _serve_vllm
+    vllm: _serve_vllm = _serve_vllm(
+        llm_family="",
+        vllm_args=[],
+    )
 
     # llama-cpp configuration
-    llama_cpp: _serve_llama_cpp
+    llama_cpp: _serve_llama_cpp = _serve_llama_cpp(
+        gpu_layers=-1,
+        max_ctx_size=4096,
+        llm_family="",
+    )
 
     # required fields
-    model_path: StrictStr
+    model_path: StrictStr = Field(default_factory=lambda: DEFAULTS.DEFAULT_MODEL)
     # additional fields with defaults
     host_port: StrictStr = "127.0.0.1:8000"
     chat_template: Optional[str] = None
@@ -305,6 +303,34 @@ class _serve(BaseModel):
     def api_base(self):
         """Returns server API URL, based on the configured host and port"""
         return get_api_base(self.host_port)
+
+
+class _generate(BaseModel):
+    """Class describing configuration of the generate sub-command."""
+
+    # model configuration
+    model_config = ConfigDict(extra="ignore")
+
+    # required fields
+    model: StrictStr
+    taxonomy_path: StrictStr
+    taxonomy_base: StrictStr
+
+    # additional fields with defaults
+    teacher: _serve = Field(default_factory=_serve)
+    num_cpus: PositiveInt = DEFAULTS.NUM_CPUS
+    chunk_word_count: PositiveInt = DEFAULTS.CHUNK_WORD_COUNT
+    # DEPRECATED: see sdg_scale_factor instead
+    # Left in place so that we can still detect and give a warning if its
+    # specified in an old configuration file.
+    num_instructions: Optional[int] = Field(
+        default=-1, deprecated="see 'sdg_scale_factor' instead", exclude=True
+    )
+    sdg_scale_factor: Optional[PositiveInt] = DEFAULTS.SDG_SCALE_FACTOR
+    output_dir: StrictStr = Field(default_factory=lambda: DEFAULTS.DATASETS_DIR)
+    prompt_file: StrictStr = Field(default_factory=lambda: DEFAULTS.PROMPT_FILE)
+    seed_file: StrictStr = Field(default_factory=lambda: DEFAULTS.SEED_FILE)
+    gpus: Optional[int] = None
 
 
 class _mmlu(BaseModel):
@@ -360,7 +386,7 @@ class _train(BaseModel):
     deepspeed_cpu_offload_optimizer: bool
 
     lora_rank: int
-    lora_quantize_dtype: str
+    lora_quantize_dtype: str | None
 
     is_padding_free: bool
 
@@ -376,6 +402,7 @@ class Config(BaseModel):
     chat: _chat
     generate: _generate
     serve: _serve
+    version: str
 
     # additional fields with defaults
     general: _general = _general()
@@ -393,6 +420,7 @@ class Config(BaseModel):
 def get_default_config() -> Config:
     """Generates default configuration for CLI"""
     return Config(
+        version=CONFIG_VERSION,
         chat=_chat(
             model=DEFAULTS.DEFAULT_MODEL,
         ),
@@ -433,7 +461,7 @@ def get_default_config() -> Config:
         evaluate=_evaluate(
             base_model=DEFAULTS.MODEL_REPO,
             mt_bench=_mtbench(
-                judge_model=DEFAULTS.JUDGE_MODEL_MT,
+                judge_model=DEFAULTS.DEFAULT_JUDGE_MODEL,
                 output_dir=DEFAULTS.EVAL_DATA_DIR,
                 max_workers=16,
             ),
@@ -447,7 +475,7 @@ def get_default_config() -> Config:
     )
 
 
-def read_train_profile(train_file):
+def read_train_profile(train_file) -> _train:
     try:
         with open(train_file, "r", encoding="utf-8") as yamlfile:
             content = yaml.safe_load(yamlfile)
@@ -459,7 +487,7 @@ def read_train_profile(train_file):
                 "- "
                 + err.get("type", "")
                 + " "
-                + "->".join(err.get("loc", ""))
+                + "->".join(err.get("loc", ""))  # type: ignore
                 + ": "
                 + err.get("msg", "").lower()
                 + "\n"
@@ -510,12 +538,15 @@ def get_api_base(host_port: str) -> str:
     return f"http://{host_port}/v1"
 
 
-def get_model_family(forced, model_path):
-    forced = MODEL_FAMILY_MAPPINGS.get(forced, forced)
-    if forced and forced.lower() not in MODEL_FAMILIES:
-        raise ConfigException(f"Unknown model family: {forced}")
+def get_model_family(family, model_path):
+    family = MODEL_FAMILY_MAPPINGS.get(family, family)
+    if family:
+        if family.lower() not in MODEL_FAMILIES:
+            raise ConfigException(f"Unknown model family: {family}")
 
-    # Try to guess the model family based on the model's filename
+        return family.lower()
+
+    # If family is not set try to guess the model family based on the model's filename
     guess = match(r"^\w*", path.basename(model_path)).group(0).lower()
     guess = MODEL_FAMILY_MAPPINGS.get(guess, guess)
 
@@ -532,6 +563,7 @@ def ensure_storage_directories_exist():
         DEFAULTS._data_dir,
         DEFAULTS.CHATLOGS_DIR,
         DEFAULTS.CHECKPOINTS_DIR,
+        DEFAULTS.OCI_DIR,
         DEFAULTS.DATASETS_DIR,
         DEFAULTS.EVAL_DATA_DIR,
         DEFAULTS.INTERNAL_DIR,
@@ -543,7 +575,8 @@ def ensure_storage_directories_exist():
     ]
 
     for dirpath in dirs_to_make:
-        os.makedirs(dirpath, exist_ok=True)
+        if not os.path.exists(dirpath):
+            os.makedirs(dirpath, exist_ok=True)
 
     additional_args_and_defaults = {
         "learning_rate": 2e-5,
@@ -561,8 +594,11 @@ def ensure_storage_directories_exist():
     }
 
     # create exper_args file for users to see/edit
-    with open(DEFAULTS.TRAIN_ADDITIONAL_OPTIONS_FILE, "w", encoding="utf-8") as outfile:
-        yaml.dump(additional_args_and_defaults, outfile)
+    if not os.path.isfile(DEFAULTS.TRAIN_ADDITIONAL_OPTIONS_FILE):
+        with open(
+            DEFAULTS.TRAIN_ADDITIONAL_OPTIONS_FILE, "w", encoding="utf-8"
+        ) as outfile:
+            yaml.dump(additional_args_and_defaults, outfile)
 
 
 class Lab:
@@ -586,7 +622,7 @@ class Lab:
         `ilab config init`. First level subcommand functions call this
         method when they need a config for one of their subcommands.
         """
-        if self.config is None:
+        if self.error_msg is not None:
             ctx.fail(self.error_msg)
 
 

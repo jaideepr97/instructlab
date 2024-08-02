@@ -107,7 +107,7 @@ def serve(
     backend: str | None,
     chat_template: str | None,
 ) -> None:
-    """Start a local server
+    """Starts a local server
 
     The vLLM backend accepts additional parameters in the form of extra
     arguments after "--" separator:
@@ -155,6 +155,9 @@ def serve(
             num_threads=num_threads,
         )
     elif backend == backends.VLLM:
+        # Warn if unsupported backend parameters are passed
+        warn_for_unsuported_backend_param(ctx)
+
         # Instantiate the vllm server
         if ctx.args:
             # extra click arguments after "--"
@@ -191,3 +194,13 @@ def serve(
     finally:
         backend_instance.shutdown()
         raise click.exceptions.Exit(0)
+
+
+def warn_for_unsuported_backend_param(
+    ctx: click.Context,
+):
+    for param in ["gpu_layers", "num_threads", "max_ctx_size"]:
+        if ctx.get_parameter_source(param) == click.core.ParameterSource.COMMANDLINE:
+            logger.warning(
+                f"Option '--{param.replace('_','-')}' not supported by the backend."
+            )

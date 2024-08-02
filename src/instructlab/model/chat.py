@@ -26,6 +26,7 @@ import openai
 from instructlab import clickext
 from instructlab import client as ilabclient
 from instructlab import configuration as cfg
+from instructlab.utils import HttpClientParams
 
 # Local
 from ..utils import get_sysprompt, http_client
@@ -60,6 +61,24 @@ CONTEXTS = {
 PROMPT_HISTORY_FILEPATH = os.path.expanduser("~/.local/chat-cli.history")
 
 PROMPT_PREFIX = ">>> "
+
+DEFAULT_ENDPOINT = cfg.get_api_base(cfg._serve().host_port)
+
+
+def is_openai_server_and_serving_model(
+    endpoint: str, api_key: str, http_params: HttpClientParams
+) -> bool:
+    """
+    Given an endpoint, returns whether or not the server is OpenAI-compatible
+    and is actively serving at least one model.
+    """
+    try:
+        models = ilabclient.list_models(
+            endpoint, api_key=api_key, http_client=http_client(http_params)
+        )
+        return len(models.data) > 0
+    except ilabclient.ClientException:
+        return False
 
 
 @click.command()
@@ -113,6 +132,7 @@ PROMPT_PREFIX = ">>> "
     "--endpoint-url",
     type=click.STRING,
     help="Custom URL endpoint for OpenAI-compatible API. Defaults to the `ilab model serve` endpoint.",
+    default=DEFAULT_ENDPOINT,
 )
 @click.option(
     "--api-key",
@@ -168,14 +188,25 @@ def chat(
     tls_client_passwd,  # pylint: disable=unused-argument
     model_family,
 ):
-    """Run a chat using the modified model"""
+    """Runs a chat using the modified model"""
     # pylint: disable=import-outside-toplevel
     # First Party
     from instructlab.model.backends.llama_cpp import is_temp_server_running
 
-    # TODO: this whole code block is replicated in generate.py. Refactor to a common function.
     backend_instance = None
-    if endpoint_url:
+    if endpoint_url != DEFAULT_ENDPOINT or (
+        endpoint_url == DEFAULT_ENDPOINT
+        and is_openai_server_and_serving_model(
+            endpoint_url,
+            api_key,
+            {
+                "tls_client_cert": tls_client_cert,
+                "tls_client_key": tls_client_key,
+                "tls_client_passwd": tls_client_passwd,
+                "tls_insecure": tls_insecure,
+            },
+        )
+    ):
         api_base = endpoint_url
     else:
         # First Party
@@ -206,10 +237,16 @@ def chat(
         # from the config is the same as the default value, then the user didn't provide a value
         # we then compare it with the value from the server to see if it's different
         if (
-            model == cfg.DEFAULTS.DEFAULT_MODEL
-            and ctx.obj.config.chat.model == cfg.DEFAULTS.DEFAULT_MODEL
+            # We need to get the base name of the model because the model path is a full path and
+            # the once from the config is just the model name
+            os.path.basename(model) == cfg.DEFAULTS.GGUF_MODEL_NAME
+            and os.path.basename(ctx.obj.config.chat.model)
+            == cfg.DEFAULTS.GGUF_MODEL_NAME
             and api_base == ctx.obj.config.serve.api_base()
         ):
+            logger.debug(
+                "No model was provided by the user as a CLI argument or in the config, will use the model from the server"
+            )
             try:
                 models = ilabclient.list_models(
                     api_base=api_base,
@@ -227,7 +264,7 @@ def chat(
                     and server_model != ctx.obj.config.chat.model
                     else model
                 )
-
+                logger.debug(f"Using model from server {model}")
             except ilabclient.ClientException as exc:
                 click.secho(
                     f"Failed to list models from {api_base}. Please check the API key and endpoint.",
@@ -327,10 +364,14 @@ class ConsoleChatBot:  # pylint: disable=too-many-instance-attributes
         )
         self._sys_print(
             Markdown(
-                f"Welcome to InstructLab Chat w/ **{self.model.upper()}**"
+                f"Welcome to InstructLab Chat w/ **{self.model_name.upper()}**"
                 + side_info_str
             )
         )
+
+    @property
+    def model_name(self):
+        return os.path.basename(os.path.normpath(self.model))
 
     @property
     def _right_prompt(self):
@@ -637,7 +678,11 @@ class ConsoleChatBot:  # pylint: disable=too-many-instance-attributes
 
         response_content = Text()
         panel = (
-            Panel(response_content, title=self.model, subtitle_align="right")
+            Panel(
+                response_content,
+                title=self.model_name,
+                subtitle_align="right",
+            )
             if box
             else response_content
         )
@@ -694,7 +739,7 @@ def chat_cli(
     for m in model_list:
         model_ids.append(m.id)
     if not any(model == m for m in model_ids):
-        if model == cfg.DEFAULTS.MODEL_NAME:
+        if model == cfg.DEFAULTS.MODEL_NAME_OLD:
             logger.info(
                 f"Model {model} is not a full path. Try running ilab config init or edit your config to have the full model path for serving, chatting, and generation."
             )

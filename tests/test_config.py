@@ -1,12 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Standard
+from typing import Any
+from unittest.mock import patch
 import logging
 import os
+import pathlib
+import shutil
 
 # Third Party
 import platformdirs
 import pytest
+import yaml
 
 # First Party
 from instructlab import configuration as config
@@ -20,9 +25,11 @@ class TestConfig:
         package_name = "instructlab"
         internal_dirname = "internal"
         data_dir = platformdirs.user_data_dir(package_name)
-        default_model = f"{data_dir}/models/merlinite-7b-lab-Q4_K_M"
+        cache_dir = platformdirs.user_cache_dir(package_name)
+        default_model = f"{cache_dir}/models/merlinite-7b-lab-Q4_K_M.gguf"
 
         assert cfg.general is not None
+        assert cfg.version is not None
         assert cfg.general.log_level == "INFO"
         assert cfg.general.debug_level == 0
 
@@ -41,11 +48,21 @@ class TestConfig:
         assert cfg.general.log_level == "INFO"
 
         assert cfg.generate is not None
+        assert cfg.generate.teacher.model_path == default_model
+        assert cfg.generate.teacher.llama_cpp is not None
+        assert cfg.generate.teacher.llama_cpp.gpu_layers == -1
+        assert cfg.generate.teacher.llama_cpp.max_ctx_size == 4096
+        assert cfg.generate.teacher.llama_cpp.llm_family == ""
+        assert cfg.generate.teacher.vllm is not None
+        assert cfg.generate.teacher.vllm.vllm_args == []
+        assert cfg.generate.teacher.host_port == "127.0.0.1:8000"
+        assert cfg.generate.teacher.backend is None
+        assert cfg.generate.teacher.chat_template is None
         assert cfg.generate.model == default_model
         assert cfg.generate.taxonomy_path == f"{data_dir}/taxonomy"
         assert cfg.generate.taxonomy_base == "origin/main"
         assert cfg.generate.num_cpus == 10
-        assert cfg.generate.num_instructions == 100
+        assert cfg.generate.sdg_scale_factor == 30
         assert cfg.generate.chunk_word_count == 1000
         assert cfg.generate.output_dir == f"{data_dir}/datasets"
         assert cfg.generate.prompt_file == f"{data_dir}/{internal_dirname}/prompt.txt"
@@ -67,8 +84,8 @@ class TestConfig:
 
     def _assert_model_defaults(self, cfg):
         package_name = "instructlab"
-        data_dir = platformdirs.user_data_dir(package_name)
-        default_model = f"{data_dir}/models/merlinite-7b-lab-Q4_K_M"
+        cache_dir = platformdirs.user_cache_dir(package_name)
+        default_model = f"{cache_dir}/models/merlinite-7b-lab-Q4_K_M.gguf"
 
         assert cfg.chat is not None
         assert cfg.chat.model == default_model
@@ -102,10 +119,11 @@ class TestConfig:
             )
         with pytest.raises(
             config.ConfigException,
-            match=r"""4 errors in [\/\w-]+config.yaml:
+            match=r"""5 errors in [\/\w-]+config.yaml:
 - missing chat: field required
 - missing generate: field required
 - missing serve: field required
+- missing version: field required
 - missing evaluate: field required
 """,
         ):
@@ -119,15 +137,26 @@ class TestConfig:
   log_level: INFO
 generate:
   model: models/merlinite-7b-lab-Q4_K_M.gguf
+  teacher:
+    model_path: models/granite-7b-lab-Q4_K_M.gguf
+    chat_template: tokenizer
+    llama_cpp:
+      gpu_layers: 1
+      max_ctx_size: 2048
+      llm_family: ''
+    vllm:
+      vllm_args:
+         - --tensor-parallel-size=8
 """
             )
         with pytest.raises(
             config.ConfigException,
-            match=r"""5 errors in [\/\w-]+config.yaml:
+            match=r"""6 errors in [\/\w-]+config.yaml:
 - missing chat: field required
 - missing generate->taxonomy_path: field required
 - missing generate->taxonomy_base: field required
 - missing serve: field required
+- missing version: field required
 - missing evaluate: field required
 """,
         ):
@@ -158,6 +187,8 @@ generate:
             "MERLINiTe": "merlinite",
             # mapping granite to merlinite
             "granite": "merlinite",
+            # default empty value of model_family will use name of model in model path to guess model_family
+            "": "merlinite",
         }
         bad_cases = [
             # unknown family
@@ -177,12 +208,23 @@ generate:
         with open(config_path, "w", encoding="utf-8") as config_file:
             config_file.write(
                 """\
+version: 1.0.0
 chat:
   model: models/granite-7b-lab-Q4_K_M.gguf
 generate:
   model: models/granite-7b-lab-Q4_K_M.gguf
   taxonomy_base: upstream/main
   taxonomy_path: mytaxonomy
+  teacher:
+    model_path: models/granite-7b-lab-Q4_K_M.gguf
+    chat_template: tokenizer
+    llama_cpp:
+      gpu_layers: 1
+      max_ctx_size: 2048
+      llm_family: ''
+    vllm:
+      vllm_args:
+         - --tensor-parallel-size=8
 serve:
   model_path: models/granite-7b-lab-Q4_K_M.gguf
   chat_template: tokenizer
@@ -242,3 +284,86 @@ def test_logging(log_level, debug_level, root, instructlab, openai_httpx):
     assert logging.getLogger("instructlab").getEffectiveLevel() == instructlab
     assert logging.getLogger("openai").getEffectiveLevel() == openai_httpx
     assert logging.getLogger("httpx").getEffectiveLevel() == openai_httpx
+
+
+@patch.multiple(
+    config.DEFAULTS,
+    _cache_home="/cache/instructlab",
+    _config_dir="/config/instructlab",
+    _data_dir="/data/instructlab",
+)
+def test_compare_default_config_testdata(
+    testdata_path: pathlib.Path, tmp_path: pathlib.Path, regenerate_testdata: bool
+):
+    assert config.DEFAULTS.CHECKPOINTS_DIR == "/data/instructlab/checkpoints"
+    saved_file = testdata_path / "default_config.yaml"
+    current_file = tmp_path / "current_config.yaml"
+
+    current_cfg = config.get_default_config()
+    # roundtrip to verify serialization and de-serialization
+    config.write_config(current_cfg, str(current_file))
+    with current_file.open(encoding="utf-8") as yamlfile:
+        current_content = yaml.safe_load(yamlfile)
+
+    if regenerate_testdata:
+        shutil.copy(current_file, saved_file)
+
+    with saved_file.open(encoding="utf-8") as yamlfile:
+        saved_content = yaml.safe_load(yamlfile)
+
+    assert current_content == saved_content, (
+        "current and expected configs are different. If the change was "
+        "intentional, run 'make regenerate-testdata' and commit the "
+        "updated test data."
+    )
+
+
+@pytest.mark.parametrize(
+    "lora_quantize_dtype,additional_args,raises_exception",
+    [
+        ("nf4", {}, False),
+        (None, {}, False),
+        ("nf4", None, True),
+        (None, None, True),
+        ("valid-for-cli-but-not-for-training-library", {}, False),
+        ("nf4", {"lora_alpha": 32}, False),
+    ],
+)
+def test_read_train_profile(
+    lora_quantize_dtype: str | None,
+    additional_args: dict[str, Any] | None,
+    raises_exception: bool,
+    tmp_path_home,
+):
+    # define a profile with yaml
+    profile_data = {
+        "model_path": "/path/to/model",
+        "data_path": "/path/to/data",
+        "ckpt_output_dir": "/path/to/checkpoints",
+        "data_output_dir": "/dev/shm",
+        "max_seq_len": 4096,
+        "max_batch_len": 60_000,
+        "num_epochs": 10,
+        "effective_batch_size": 3840,
+        "save_samples": 250_000,
+        "deepspeed_cpu_offload_optimizer": True,
+        "lora_rank": 4,
+        "lora_quantize_dtype": lora_quantize_dtype,
+        "is_padding_free": False,
+        "nproc_per_node": 8,
+        "additional_args": additional_args,
+    }
+    train_profile = pathlib.Path(tmp_path_home, "profile.yaml")
+    with open(train_profile, "w", encoding="utf-8") as outfile:
+        yaml.dump(profile_data, outfile)
+
+    if raises_exception:
+        with pytest.raises(config.ConfigException):
+            config.read_train_profile(train_profile)
+    else:
+        result = config.read_train_profile(train_profile)
+        assert result is not None
+        for k, v in result.dict().items():
+            if k not in profile_data:
+                continue
+            assert v == profile_data[k]

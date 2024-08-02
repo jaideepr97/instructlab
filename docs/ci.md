@@ -19,6 +19,9 @@ job](https://github.com/instructlab/instructlab/blob/main/.github/workflows/e2e.
 that runs automatically on all PRs and after commits merge to `main` or release
 branches.
 
+We are currently doing a trial of running the smallest AWS-based e2e workflow
+automatically against PRs, as well.
+
 There are other E2E jobs that can be triggered manually on the [actions
 page](https://github.com/instructlab/instructlab/actions) for the repository.
 These run on a variety of instance types and can be run at the discretion of
@@ -38,8 +41,8 @@ the E2E job configuration files found
 | `M` | Use Mixtral model (4-bit quantized) |
 | `f` | Run "fullsize" training |
 | `F` | Run "fullsize" SDG |
-| `g` | Run with Granite model |
 | `v` | Run with vLLM for serving |
+| `T` | Use the 'full' training library rather than legacy training |
 
 ### Trigger via GitHub Web UI
 
@@ -77,16 +80,16 @@ The project currently supports the usage of the following runners for the E2E jo
 
 ### E2E Test Matrix
 
-| Area | Feature | [`e2e.yml`](https://github.com/instructlab/instructlab/blob/main/.github/workflows/e2e.yml) (small) | [`e2e-nvidia-t4-x1.yml`](https://github.com/instructlab/instructlab/blob/main/.github/workflows/e2e-nvidia-t4-x1.yml) (small) | [`e2e-nvidia-a10g-x1.yml`](https://github.com/instructlab/instructlab/blob/main/.github/workflows/e2e-nvidia-a10g-x1.yml) (medium) | [`e2e-nvidia-a10g-x4.yml`](https://github.com/instructlab/instructlab/blob/main/.github/workflows/e2e-nvidia-a10g-x4.yml) (large) |
+| Area | Feature | [`e2e.yml`](https://github.com/instructlab/instructlab/blob/main/.github/workflows/e2e.yml) (small) ![`e2e.yaml` on `main`](https://github.com/instructlab/instructlab/actions/workflows/e2e.yml/badge.svg?branch=main)| [`e2e-nvidia-t4-x1.yml`](https://github.com/instructlab/instructlab/blob/main/.github/workflows/e2e-nvidia-t4-x1.yml) (small) | [`e2e-nvidia-a10g-x1.yml`](https://github.com/instructlab/instructlab/blob/main/.github/workflows/e2e-nvidia-a10g-x1.yml) (medium) | [`e2e-nvidia-a10g-x4.yml`](https://github.com/instructlab/instructlab/blob/main/.github/workflows/e2e-nvidia-a10g-x4.yml) (large) ![`e2e-nvidia-a10g-x4.yaml` on `main`](https://github.com/instructlab/instructlab/actions/workflows/e2e-nvidia-a10g-x4.yml/badge.svg?branch=main)|
 | --- | --- | --- | --- | --- | --- |
 | **Serving**  | llama-cpp                |✅|✅|✅|✅ (temporary)|
-|              | vllm                     |⎯|⎯|⎯|❌|
+|              | vllm                     |⎯|⎯|⎯|✅|
 | **Generate** | simple                   |✅|✅|✅|⎯|
 |              | full                     |⎯|⎯|⎯|✅|
-| **Training** | legacy+Linux             |⎯|⎯|✅|⎯|
+| **Training** | legacy+Linux             |⎯|⎯|❌|⎯|
 |              | legacy+Linux+4-bit-quant |✅|✅|⎯|⎯|
-|              | training-lib             |⎯|⎯|✅(*1)|❌|
-| **Eval**     | eval                     |⎯|⎯|✅(*2)|❌️|
+|              | training-lib             |⎯|⎯|⎯|✅|
+| **Eval**     | eval                     |⎯|⎯|❌(*2)|✅|
 
 Points of clarification (*):
 
