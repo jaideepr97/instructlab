@@ -465,6 +465,10 @@ class _train(BaseModel):
         default=False,
         description="Boolean to indicate if the model being trained is a padding-free transformer model such as Granite.",
     )
+    use_dolomite: bool = Field(
+        default=False,
+        description="Boolean to indicate if the model being trained should use Dolomite architecture.",
+    )
     nproc_per_node: int = Field(
         default=1,
         description="Number of GPUs to use for training. This value is not supported in legacy training or MacOS.",
@@ -1306,6 +1310,9 @@ def init(
 def map_train_to_library(ctx, params):
     # first do a lazy unwrap into the respective options
     train_args = TrainingArgs(**params)
+    print("~~~~~~~~~##########")
+    print(train_args)
+    os._exit(0)
     torch_args = TorchrunArgs(**params)
 
     ds_args = DeepSpeedOptions(
