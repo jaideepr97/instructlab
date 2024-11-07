@@ -12,7 +12,8 @@ import click
 from instructlab import clickext
 from instructlab.configuration import DEFAULTS
 from instructlab.data.generate_data import gen_data  # type: ignore
-from instructlab.utils import HttpClientParams, contains_argument
+from instructlab.utils import HttpClientParams, contains_argument, get_sysprompt, get_model_arch
+from instructlab.common import SupportedModelArchitectures
 
 logger = logging.getLogger(__name__)
 
@@ -227,6 +228,12 @@ def generate(
         }
     )
 
+    # determine student model arch from train section of config and pick system prompt and pretraining format to
+    # pass to SDG appropriately
+    student_model_arch = get_model_arch(ctx.obj.config.train.model_path)
+    system_prompt = get_sysprompt(student_model_arch)
+    use_legacy_pretraining_format = (student_model_arch.lower() == SupportedModelArchitectures.LLAMA)
+
     try:
         gen_data(
             serve_cfg,
@@ -249,6 +256,8 @@ def generate(
             batch_size,
             gpus,
             checkpoint_dir,
+            system_prompt,
+            use_legacy_pretraining_format
         )
     except Exception as exc:
         click.secho(f"failed to generate data with exception: {exc}", fg="red")

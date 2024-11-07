@@ -35,6 +35,8 @@ def gen_data(
     batch_size,
     gpus,
     checkpoint_dir,
+    system_prompt,
+    use_legacy_pretraining_format
 ):
     """Generates synthetic data to enhance your example data"""
     backend_instance = None
@@ -98,6 +100,8 @@ def gen_data(
             pipeline=pipeline,
             batch_size=batch_size,
             checkpoint_dir=checkpoint_dir,
+            system_prompt=system_prompt,
+            use_legacy_pretraining_format=use_legacy_pretraining_format
         )
     except GenerateException as exc:
         raise ValueError(
