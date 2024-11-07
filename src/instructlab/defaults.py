@@ -11,11 +11,11 @@ CONFIG_FILENAME = "config.yaml"
 CONFIG_VERSION = "1.0.0"
 
 # Model families understood by ilab
-MODEL_FAMILIES = {"merlinite", "mixtral"}
+MODEL_FAMILIES = {"granite", "granite_legacy", "mixtral"}
 
 # Map model names to their family
 MODEL_FAMILY_MAPPINGS = {
-    "granite": "merlinite",
+    "merlinite": "granite_legacy",
 }
 
 # Default log format
