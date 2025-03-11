@@ -3,7 +3,7 @@
 # Standard
 from os import path
 from re import match
-from typing import Any, Optional, Union, List
+from typing import Any, List, Optional, Union
 import enum
 import logging
 import os

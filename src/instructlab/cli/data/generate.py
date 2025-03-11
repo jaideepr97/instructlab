@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
     cls=clickext.ConfigOption,
     config_sections="teacher",
     show_default=False,
+    hidden=True,
 )
 @click.option(
     "--num-cpus",
@@ -167,9 +168,17 @@ logger = logging.getLogger(__name__)
 )
 @click.option(
     "--student-model-id",
-    help="ID of the custom model you want to use for the student.",
+    help="ID of the custom model you want to use as the student model.",
     default=None,
     type=click.STRING,
+    show_default=True,
+)
+@click.option(
+    "--teacher-model-id",
+    help="ID of the custom model you want to use as the teacher model.",
+    default=None,
+    type=click.STRING,
+    show_default=True,
 )
 @click.pass_context
 @clickext.display_params
@@ -276,18 +285,23 @@ def generate(
             student_model_config = resolve_model_id(
                 student_model_id, ctx.obj.config.models
             )
+            if not student_model_config:
+                raise ValueError(
+                    f"Base model with ID '{student_model_id}' not found in the configuration."
+                )
         except ValueError as ve:
             click.secho(f"failed to locate student model by ID: {ve}", fg="red")
             raise click.exceptions.Exit(1)
-        else:
-            system_prompt = student_model_config.system_prompt
-            legacy_pretraining_format = (
-                True  # just set this to true for testing. We need to fix this in SDG
-            )
 
-    assert None not in (legacy_pretraining_format, system_prompt), (
-        "system_prompt and legacy_pretraining_format must have been set"
-    )
+        system_prompt = student_model_config.system_prompt
+        legacy_pretraining_format = (
+            True  # just set this to true for testing. We need to fix this in SDG
+        )
+
+    assert None not in (
+        legacy_pretraining_format,
+        system_prompt,
+    ), "system_prompt and legacy_pretraining_format must have been set"
 
     process_mode = ILAB_PROCESS_MODES.ATTACHED
     if detached:
