@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # yamllint disable rule:line-length
 
-name: E2E (NVIDIA L40S x4)
+name: E2E (NVIDIA L40S x4) LLAMA
 
 on:
   schedule:
@@ -159,7 +159,7 @@ jobs:
           LARGE_LLAMA: 1
         run: |
           . venv/bin/activate
-          ./scripts/e2e-ci.sh -l
+          ./scripts/e2e-ci.sh -a
 
       - name: Check disk after tests
         run: |
